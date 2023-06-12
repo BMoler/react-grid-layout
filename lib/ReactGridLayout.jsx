@@ -401,36 +401,84 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     const { cols, preventCollision, allowOverlap } = this.props;
 
     const [newLayout, l] = withLayoutItem(layout, i, l => {
-      // Something like quad tree should be used
-      // to find collisions faster
-      let hasCollisions;
-      if (preventCollision && !allowOverlap) {
-        const collisions = getAllCollisions(layout, { ...l, w, h }).filter(
-          layoutItem => layoutItem.i !== l.i
-        );
-        hasCollisions = collisions.length > 0;
+      let nextItems = [];
+      let groupedItems = [];
+      let currentGroup = [];
 
-        // If we're colliding, we need adjust the placeholder.
-        if (hasCollisions) {
-          // adjust w && h to maximum allowed space
-          let leastX = Infinity,
-            leastY = Infinity;
-          collisions.forEach(layoutItem => {
-            if (layoutItem.x > l.x) leastX = Math.min(leastX, layoutItem.x);
-            if (layoutItem.y > l.y) leastY = Math.min(leastY, layoutItem.y);
-          });
-
-          if (Number.isFinite(leastX)) l.w = leastX - l.x;
-          if (Number.isFinite(leastY)) l.h = leastY - l.y;
+      // Find next items in the same row
+      for (let item of layout) {
+        if (item.y < l.y + l.h && item.y + item.h > l.y && item.x > l.x) {
+          nextItems.push(item);
         }
       }
 
-      if (!hasCollisions) {
-        // Set new width and height.
-        l.w = w;
-        l.h = h;
+      nextItems.sort((a, b) => a.x - b.x);
+
+      console.log(nextItems)
+
+      for (let i = 0; i < nextItems.length; i++) {
+        let item = nextItems[i];
+        let nextItem = nextItems[i + 1];
+
+        // Add the current item to the currentGroup
+        currentGroup.push(item);
+
+        // If the next item is not at the same x position or doesn't exist, it's the end of the current group
+        if (!nextItem || item.x !== nextItem.x) {
+          // Push the current group into groupedItems
+          groupedItems.push(currentGroup);
+
+          // Start a new group for the next item
+          currentGroup = [];
+        }
       }
 
+
+      if (currentGroup.length > 0) {
+        // Push the last group into groupedItems if it's not empty
+        groupedItems.push(currentGroup);
+      }
+
+      // Shrink next items to the right if available
+      let offset = 0;
+      let remainingChange = (w - l.w);
+      // for (let nextItem of nextItems) {
+
+      //   let widthDiff = nextItem.w - (w - l.w);
+      //   nextItem.w = widthDiff > 0 ? widthDiff : 1;  // make sure width is not less than 0
+      //   nextItem.x += offset;
+      //   offset += (w - l.w);
+      // }
+
+      for (let group of groupedItems) {
+        if (remainingChange <= 0) {
+          break;
+        }
+
+        // Determine how much this group can shrink
+        let totalAllowableShrinkage = 0;
+        for (let item of group) {
+          totalAllowableShrinkage += item.w - 1;
+        }
+
+        // Determine how much to shrink this group by
+        let actualShrinkage = Math.min(totalAllowableShrinkage, remainingChange);
+
+        for (let item of group) {
+          let widthDiff = item.w - (w - l.w);
+          item.w = widthDiff > 0 ? widthDiff : 1;  // make sure width is not less than 0
+          item.x += offset;
+          offset += (w - l.w);
+        }
+
+        remainingChange -= actualShrinkage;
+      }
+
+      // Set new width and height.
+      l.w = w;
+      l.h = h;
+
+      // Merge the nextItems back into the layout
       return l;
     });
 
@@ -706,87 +754,89 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     }
   };
 
-  removeDroppingPlaceholder: () => void = () => {
-    const { droppingItem, cols } = this.props;
-    const { layout } = this.state;
+removeDroppingPlaceholder: () => void = () => {
+  const { droppingItem, cols } = this.props;
+  const { layout } = this.state;
 
-    const newLayout = compact(
-      layout.filter(l => l.i !== droppingItem.i),
-      compactType(this.props),
-      cols
-    );
+  const newLayout = compact(
+    layout.filter(l => l.i !== droppingItem.i),
+    compactType(this.props),
+    cols
+  );
 
-    this.setState({
-      layout: newLayout,
-      droppingDOMNode: null,
-      activeDrag: null,
-      droppingPosition: undefined
-    });
-  };
+  this.setState({
+    layout: newLayout,
+    droppingDOMNode: null,
+    activeDrag: null,
+    droppingPosition: undefined
+  });
+};
 
-  onDragLeave: EventHandler = e => {
-    e.preventDefault(); // Prevent any browser native action
-    e.stopPropagation();
-    this.dragEnterCounter--;
+onDragLeave: EventHandler = e => {
+  e.preventDefault(); // Prevent any browser native action
+  e.stopPropagation();
+  this.dragEnterCounter--;
 
-    // onDragLeave can be triggered on each layout's child.
-    // But we know that count of dragEnter and dragLeave events
-    // will be balanced after leaving the layout's container
-    // so we can increase and decrease count of dragEnter and
-    // when it'll be equal to 0 we'll remove the placeholder
-    if (this.dragEnterCounter === 0) {
-      this.removeDroppingPlaceholder();
-    }
-  };
-
-  onDragEnter: EventHandler = e => {
-    e.preventDefault(); // Prevent any browser native action
-    e.stopPropagation();
-    this.dragEnterCounter++;
-  };
-
-  onDrop: EventHandler = (e: Event) => {
-    e.preventDefault(); // Prevent any browser native action
-    e.stopPropagation();
-    const { droppingItem } = this.props;
-    const { layout } = this.state;
-    const item = layout.find(l => l.i === droppingItem.i);
-
-    // reset dragEnter counter on drop
-    this.dragEnterCounter = 0;
-
+  // onDragLeave can be triggered on each layout's child.
+  // But we know that count of dragEnter and dragLeave events
+  // will be balanced after leaving the layout's container
+  // so we can increase and decrease count of dragEnter and
+  // when it'll be equal to 0 we'll remove the placeholder
+  if (this.dragEnterCounter === 0) {
     this.removeDroppingPlaceholder();
+  }
+};
 
-    this.props.onDrop(layout, item, e);
+onDragEnter: EventHandler = e => {
+  e.preventDefault(); // Prevent any browser native action
+  e.stopPropagation();
+  this.dragEnterCounter++;
+};
+
+onDrop: EventHandler = (e: Event) => {
+  e.preventDefault(); // Prevent any browser native action
+  e.stopPropagation();
+  const { droppingItem } = this.props;
+  const { layout } = this.state;
+  const item = layout.find(l => l.i === droppingItem.i);
+
+  // reset dragEnter counter on drop
+  this.dragEnterCounter = 0;
+
+  this.removeDroppingPlaceholder();
+
+  this.props.onDrop(layout, item, e);
+};
+
+render(): React.Element < "div" > {
+  const { className, style, isDroppable, innerRef } = this.props;
+
+  const mergedClassName = clsx(layoutClassName, className);
+  const mergedStyle = {
+    height: this.containerHeight(),
+    ...style
   };
 
-  render(): React.Element<"div"> {
-    const { className, style, isDroppable, innerRef } = this.props;
-
-    const mergedClassName = clsx(layoutClassName, className);
-    const mergedStyle = {
-      height: this.containerHeight(),
-      ...style
-    };
-
-    return (
+  return(
       <div
-        ref={innerRef}
-        className={mergedClassName}
-        style={mergedStyle}
-        onDrop={isDroppable ? this.onDrop : noop}
-        onDragLeave={isDroppable ? this.onDragLeave : noop}
-        onDragEnter={isDroppable ? this.onDragEnter : noop}
-        onDragOver={isDroppable ? this.onDragOver : noop}
+        ref = { innerRef }
+        className = { mergedClassName }
+        style = { mergedStyle }
+        onDrop = { isDroppable? this.onDrop : noop }
+        onDragLeave = { isDroppable? this.onDragLeave : noop }
+        onDragEnter = { isDroppable? this.onDragEnter : noop }
+        onDragOver = { isDroppable? this.onDragOver : noop }
       >
-        {React.Children.map(this.props.children, child =>
-          this.processGridItem(child)
-        )}
-        {isDroppable &&
-          this.state.droppingDOMNode &&
-          this.processGridItem(this.state.droppingDOMNode, true)}
-        {this.placeholder()}
-      </div>
+    {
+      React.Children.map(this.props.children, child =>
+        this.processGridItem(child)
+      )
+    }
+        { isDroppable &&
+  this.state.droppingDOMNode &&
+  this.processGridItem(this.state.droppingDOMNode, true)}
+{ this.placeholder() }
+      </div >
     );
   }
 }
