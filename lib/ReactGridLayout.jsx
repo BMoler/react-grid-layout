@@ -12,6 +12,9 @@ import {
   fastRGLPropsEqual,
   getAllCollisions,
   getLayoutItem,
+  getRightCollisions,
+  getRightCollisionsLength,
+  getRightResizables,
   moveElement,
   noop,
   synchronizeLayoutWithChildren,
@@ -401,84 +404,35 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     const { cols, preventCollision, allowOverlap } = this.props;
 
     const [newLayout, l] = withLayoutItem(layout, i, l => {
-      let nextItems = [];
-      let groupedItems = [];
-      let currentGroup = [];
+      // Something like quad tree should be used
+      // to find collisions faster
+      let hasCollisions;
+      if (preventCollision && !allowOverlap) {
+        const collisions = getRightResizables(getRightCollisions(layout, { ...l, w, h }))
+        const hasCollisions = collisions.length > 1
+        console.log(collisions)
 
-      // Find next items in the same row
-      for (let item of layout) {
-        if (item.y < l.y + l.h && item.y + item.h > l.y && item.x > l.x) {
-          nextItems.push(item);
+        // If we're colliding, we need adjust the placeholder.
+        if (hasCollisions) {
+          for (const layoutItem of collisions) {
+            if (layoutItem.w > 1) {
+              layoutItem.x += 1;
+              layoutItem.w -= 1;
+            }
+            else if (layoutItem.w === 1) {
+              layoutItem.x += 1;
+            }
+          }
         }
       }
 
-      nextItems.sort((a, b) => a.x - b.x);
-
-      console.log(nextItems)
-
-      for (let i = 0; i < nextItems.length; i++) {
-        let item = nextItems[i];
-        let nextItem = nextItems[i + 1];
-
-        // Add the current item to the currentGroup
-        currentGroup.push(item);
-
-        // If the next item is not at the same x position or doesn't exist, it's the end of the current group
-        if (!nextItem || item.x !== nextItem.x) {
-          // Push the current group into groupedItems
-          groupedItems.push(currentGroup);
-
-          // Start a new group for the next item
-          currentGroup = [];
-        }
+      if (!hasCollisions) {
+        // Set new width and height.
+        console.log("t")
+        l.w = w;
+        l.h = h;
       }
 
-
-      if (currentGroup.length > 0) {
-        // Push the last group into groupedItems if it's not empty
-        groupedItems.push(currentGroup);
-      }
-
-      // Shrink next items to the right if available
-      let offset = 0;
-      let remainingChange = (w - l.w);
-      // for (let nextItem of nextItems) {
-
-      //   let widthDiff = nextItem.w - (w - l.w);
-      //   nextItem.w = widthDiff > 0 ? widthDiff : 1;  // make sure width is not less than 0
-      //   nextItem.x += offset;
-      //   offset += (w - l.w);
-      // }
-
-      for (let group of groupedItems) {
-        if (remainingChange <= 0) {
-          break;
-        }
-
-        // Determine how much this group can shrink
-        let totalAllowableShrinkage = 0;
-        for (let item of group) {
-          totalAllowableShrinkage += item.w - 1;
-        }
-
-        // Determine how much to shrink this group by
-        let actualShrinkage = Math.min(totalAllowableShrinkage, remainingChange);
-
-        for (let item of group) {
-          let widthDiff = item.w - (w - l.w);
-          item.w = widthDiff > 0 ? widthDiff : 1;  // make sure width is not less than 0
-          item.x += offset;
-          offset += (w - l.w);
-        }
-
-        remainingChange -= actualShrinkage;
-      }
-
-      // Set new width and height.
-      l.w = w;
-      l.h = h;
-
-      // Merge the nextItems back into the layout
       return l;
     });
 
@@ -573,7 +527,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
         transformScale={transformScale}
       >
         <div />
-      </GridItem>
+      </GridItem >
     );
   }
 
